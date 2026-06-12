@@ -35,7 +35,6 @@ body {
 .intensity-display span { font-size: 22px; font-weight: 400; color: var(--muted); }
 input[type=range] { width: 100%; accent-color: var(--accent); cursor: pointer; height: 6px; }
 
-/* Updated Button for Start/Stop Toggle */
 .action-btn { width: 100%; max-width: 420px; padding: 16px; border-radius: 14px; border: 1px solid #2d1818; font-size: 16px; font-weight: 700; cursor: pointer; background: #1c1c24; transition: background .15s, transform .1s; }
 .action-btn:active { transform: scale(.98); background: #2a1010; }
 
@@ -45,7 +44,6 @@ input[type=range] { width: 100%; accent-color: var(--accent); cursor: pointer; h
 .mode-btn.active { background: linear-gradient(135deg,rgba(192,132,252,.2),rgba(129,140,248,.2)); border-color: var(--accent); color: var(--accent); }
 .mode-icon { font-size: 18px; display: block; margin-bottom: 3px; }
 
-/* Touchpad Styles */
 .touch-pad { width: 100%; max-width: 420px; height: 120px; background: #15151e; border: 1px solid var(--border); border-radius: 14px; position: relative; touch-action: none; overflow: hidden; display: flex; align-items: center; justify-content: center; user-select: none; }
 .touch-indicator { width: 40px; height: 40px; background: radial-gradient(circle, var(--accent) 0%, transparent 70%); border-radius: 50%; position: absolute; pointer-events: none; opacity: 0; transform: translate(-50%, -50%); transition: opacity 0.2s; }
 .touch-label { color: var(--muted); font-size: 12px; pointer-events: none; text-align: center; }
@@ -103,7 +101,6 @@ input[type=range] { width: 100%; accent-color: var(--accent); cursor: pointer; h
 <div class="mode-grid" id="grid-patterns"></div>
 
 <script>
-// ── Wave data ─────────────────────────────────────────────────────────────
 const WAVES_CLASSIC = [
   { name:'Wave 1',  icon:'〰️', vals:[.5] },
   { name:'Wave 2',  icon:'📈', vals:[.75] },
@@ -121,11 +118,9 @@ const WAVES_PATTERNS = [
   { name:'Interval',  icon:'🎯', vals:[0,0,.6,.6,0,0,.6,.6,0,0,.6,.6,0,0,.6,.6] },
 ];
 
-// Original Variables + New Tracking Variables
 let intensity = 50, currentMode = null;
 let peer = new Peer();
 let conn = null;
-
 let isRunning = false;
 let walkingActive = false;
 let lastWalkTime = 0;
@@ -150,11 +145,9 @@ function buildGrids() {
 }
 buildGrids();
 
-// ── WebRTC Connection (100% UNTOUCHED FROM ORIGINAL) ──────────────────────
 function connectToHost() {
   const id = document.getElementById('host-id').value.trim();
   if (!id) return;
-  
   conn = peer.connect(id);
   conn.on('open', () => {
     document.getElementById('overlay').style.display = 'none';
@@ -171,14 +164,12 @@ function connectToHost() {
   });
 }
 
-// ── Mode & Play Logic ─────────────────────────────────────────────────────
 function scaleVals(vals, intensity) {
   return vals.map(v => Math.min(100, v * intensity));
 }
 
 function sendCurrentMode() {
   if (!conn || !currentMode) return;
-  
   if (currentMode.id === 'constant' || currentMode.id === 'walking') {
     conn.send({ action: 'constant', val: intensity });
   } else {
@@ -190,7 +181,6 @@ function sendCurrentMode() {
 function setPlayState(play) {
   isRunning = play;
   const btn = document.getElementById('play-btn');
-  
   if (isRunning) {
     btn.innerHTML = '⏹ Stop';
     btn.style.color = 'var(--red)';
@@ -204,32 +194,27 @@ function setPlayState(play) {
 
 function togglePlay() {
   if (!currentMode) {
-    selectMode('constant'); // Default to constant if nothing selected yet
+    selectMode('constant');
   } else {
     setPlayState(!isRunning);
   }
 }
 
 function selectMode(modeId, vals) {
-  // Clear walking sensor if switching away from it
   if (modeId !== 'walking') stopWalking();
-
   document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('mode-' + modeId)?.classList.add('active');
   currentMode = { id: modeId, vals };
-
-  setPlayState(true); // Auto-start on tap, just like the original code did
+  setPlayState(true);
 }
 
 function onIntensity(val) {
   intensity = parseInt(val);
   document.getElementById('int-display').innerHTML = `${intensity} <span>%</span>`;
-  document.getElementById('int-slider').value = intensity; // Keep slider synced
-  
+  document.getElementById('int-slider').value = intensity;
   if (isRunning) sendCurrentMode();
 }
 
-// ── Touch Control ─────────────────────────────────────────────────────────
 const touchPad = document.getElementById('touch-pad');
 const touchInd = document.getElementById('touch-indicator');
 
@@ -237,15 +222,11 @@ function handleTouch(e) {
   e.preventDefault();
   const touch = e.touches[0] || e.changedTouches[0];
   const rect = touchPad.getBoundingClientRect();
-  
   let x = Math.max(0, Math.min(touch.clientX - rect.left, rect.width));
   let y = Math.max(0, Math.min(touch.clientY - rect.top, rect.height));
-
   touchInd.style.opacity = 1;
   touchInd.style.left = x + 'px';
   touchInd.style.top = y + 'px';
-
-  // Map vertical position to intensity
   const newIntensity = Math.round((1 - (y / rect.height)) * 100);
   onIntensity(newIntensity);
 }
@@ -258,25 +239,20 @@ touchPad.addEventListener('touchstart', (e) => {
 touchPad.addEventListener('touchmove', handleTouch);
 touchPad.addEventListener('touchend', () => { touchInd.style.opacity = 0; });
 
-
-// ── Walking (Accelerometer) Control ───────────────────────────────────────
 async function toggleWalking() {
   if (walkingActive) {
     stopWalking();
     selectMode('constant');
     return;
   }
-
-  // Request permission for iOS devices
   if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
     try {
       const permission = await DeviceMotionEvent.requestPermission();
       if (permission !== 'granted') return alert('Motion permission denied.');
     } catch (e) { console.error(e); }
   }
-  
   walkingActive = true;
-  selectMode('walking'); 
+  selectMode('walking');
   window.addEventListener('devicemotion', handleWalk);
 }
 
@@ -287,26 +263,17 @@ function stopWalking() {
 
 function handleWalk(event) {
   if (!walkingActive || !isRunning) return;
-  
-  // Throttle updates
   const now = Date.now();
   if (now - lastWalkTime < 100) return;
-  
   let accel = event.accelerationIncludingGravity;
   if (!accel) return;
-
-  // Calculate bounce magnitude
   let magnitude = Math.sqrt(accel.x**2 + accel.y**2 + accel.z**2);
-  let movement = Math.max(0, magnitude - 9.8); // Subtract gravity
-  
-  // Map force to intensity (0 to 100%)
+  let movement = Math.max(0, magnitude - 9.8);
   const newIntensity = Math.min(100, Math.round((movement / 10) * 100));
-  
   onIntensity(newIntensity);
   lastWalkTime = now;
 }
 
-// ── Wake lock ─────────────────────────────────────────────────────────────
 async function keepAwake() {
   try { if ('wakeLock' in navigator) await navigator.wakeLock.request('screen'); } catch(e) {}
 }
