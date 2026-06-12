@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Locks — Host</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+:root {
+  --bg: #0a0a0f; --surface: #13131a; --border: #1e1e2a;
+  --accent: #c084fc; --green: #34d399; --red: #f87171;
+  --text: #e8e8f0; --muted: #555;
+}
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--bg); color: var(--text);
+  min-height: 100vh; display: flex; flex-direction: column;
+  align-items: center; padding: 20px; gap: 14px;
+}
+.card {
+  width: 100%; max-width: 420px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 16px; padding: 18px 20px;
+}
+h1 { font-size: 22px; font-weight: 800; letter-spacing: -0.5px; }
+h1 span { color: var(--accent); }
+.subtitle { font-size: 13px; color: var(--muted); }
+.label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 8px; }
+input, textarea {
+  width: 100%; padding: 13px 14px;
+  background: #0d0d12; border: 1px solid var(--border);
+  border-radius: 10px; color: var(--text);
+  font-size: 13px; font-family: monospace; outline: none;
+  resize: none;
+}
+input:focus, textarea:focus { border-color: var(--accent); }
+button {
+  width: 100%; padding: 15px; border-radius: 12px; border: none;
+  font-size: 15px; font-weight: 700; cursor: pointer;
+  transition: opacity 0.15s, transform 0.1s;
+}
+button:active { transform: scale(0.98); }
+button:disabled { opacity: 0.35; cursor: not-allowed; }
+.btn-primary { background: linear-gradient(135deg, var(--accent), #818cf8); color: #fff; }
+.btn-push { background: linear-gradient(135deg, var(--green), #059669); color: #fff; }
+.status-bar {
+  width: 100%; max-width: 420px;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 14px;
+}
+.status-row { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--muted); transition: background 0.3s;
+  flex-shrink: 0;
+}
+.dot.ok { background: var(--green); }
+.dot.warn { background: #facc15; animation: pulse 1s infinite; }
+.dot.err { background: var(--red); }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+.log {
+  width: 100%; max-width: 420px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 12px;
+  height: 140px; overflow-y: auto;
+  font-family: monospace; font-size: 11px; line-height: 1.7; color: var(--muted);
+}
+.log .ok { color: var(--green); }
+.log .err { color: var(--red); }
+.log .info { color: #60a5fa; }
+.current-key {
+  font-size: 11px; font-family: monospace;
+  color: var(--accent); word-break: break-all;
+  max-width: 200px; text-align: right; opacity: 0.7;
+}
+.section { width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 10px; }
+.hint { font-size: 12px; color: var(--muted); line-height: 1.6; }
+.hint b { color: var(--text); }
+</style>
+</head>
+<body>
+
+<div class="status-bar">
+  <div class="status-row">
+    <div class="dot" id="dot-github"></div>
+    <span id="lbl-github">GitHub: not set</span>
+  </div>
+  <div class="status-row">
+    <div class="dot" id="dot-em"></div>
+    <span id="lbl-em">Easemob: offline</span>
+  </div>
+</div>
+
+<div style="width:100%;max-width:420px;display:flex;align-items:baseline;justify-content:space-between">
+  <h1>🔒 Locks <span>Host</span></h1>
+  <div class="current-key" id="current-key">no key</div>
+</div>
+
+<!-- Setup (first time) -->
+<div class="card" id="setup-card">
+  <div class="label">GitHub PAT (repo write access)</div>
+  <input type="password" id="pat-input" placeholder="ghp_xxxxxxxxxxxx">
+  <div style="height:8px"></div>
+  <button class="btn-primary" onclick="savePAT()">Save PAT</button>
+  <div style="height:8px"></div>
+  <p class="hint">Your PAT is stored only on this device (localStorage). It never leaves your phone.</p>
+</div>
+
+<!-- Main controls -->
+<div class="section" id="main-section" style="display:none">
+
+  <div class="card">
+    <div class="label">New Share Link from Adorime app</div>
+    <textarea id="link-input" rows="2" placeholder="Paste full share URL here…"></textarea>
+    <div style="height:10px"></div>
+    <button class="btn-push" id="push-btn" onclick="pushNewKey()">📤 Push New Key</button>
+  </div>
+
+  <div class="card">
+    <div class="label">Status</div>
+    <p class="hint">
+      <b>1.</b> Keep this page open in Chrome.<br>
+      <b>2.</b> Keep the Adorime app open and connected.<br>
+      <b>3.</b> When the app generates a new share link, paste it above and tap Push.
+    </p>
+  </div>
+
+  <button class="btn-primary" style="background:#1c1c24;color:var(--muted);border:1px solid var(--border);font-size:13px" onclick="changePAT()">Change PAT</button>
+</div>
+
+<div class="log" id="log"></div>
+
+<!-- Easemob vendor SDK from Adorime CDN -->
+<script src="https://cdn.adorimetoy.com/app-resource/web/adorime_remote/adorime_remote_sender/js/chunk-vendors.3cc9b392.js"></script>
+
+<script>
+const REPO = 'maciek11123/Locks';
+const FILE_PATH = 'key.json';
+const BRANCH = 'main';
+const API_URL = 'https://api.adorimetoy.com:29197/prod-api/api';
+const EASEMOB_APP_KEY = '1146240320150807#adorime';
+const CMD_EVENT = 'kWebControlCmdEvent';
+const HANDSHAKE_EVENT = 'kWebHandShakeCmdEvent';
+
+let pat = '';
+let conn = null;
+let currentSecretkey = '';
+let currentFileSha = '';
+let friendIMUserId = '';
+let myIMUserId = '';
+let isEMConnected = false;
+let reconnectTimer = null;
+
+// ── Logging ───────────────────────────────────────────────────────────────
+function log(msg, type = '') {
+  const box = document.getElementById('log');
+  const d = document.createElement('div');
+  d.className = type;
+  d.textContent = `[${new Date().toLocaleTimeString('en',{hour12:false})}] ${msg}`;
+  box.appendChild(d);
+  box.scrollTop = box.scrollHeight;
+}
+
+// ── PAT management ────────────────────────────────────────────────────────
+function savePAT() {
+  const v = document.getElementById('pat-input').value.trim();
+  if (!v.startsWith('ghp_') && !v.startsWith('github_pat_')) {
+    log('PAT should start with ghp_ or github_pat_', 'err'); return;
+  }
+  pat = v;
+  localStorage.setItem('locks_pat', v);
+  log('PAT saved', 'ok');
+  init();
+}
+
+function changePAT() {
+  document.getElementById('setup-card').style.display = 'block';
+  document.getElementById('main-section').style.display = 'none';
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────
+async function init() {
+  pat = localStorage.getItem('locks_pat') || '';
+  if (!pat) {
+    document.getElementById('setup-card').style.display = 'block';
+    document.getElementById('main-section').style.display = 'none';
+    log('Enter your GitHub PAT to get started', 'info');
+    return;
+  }
+  document.getElementById('setup-card').style.display = 'none';
+  document.getElementById('main-section').style.display = 'flex';
+  log('PAT loaded ✓', 'ok');
+  setDot('github', 'ok', 'GitHub: ready');
+
+  // Load existing key from GitHub if any
+  await loadCurrentKey();
+
+  // Auto-connect Easemob if we have a key
+  if (currentSecretkey) {
+    await connectWithKey(currentSecretkey);
+  }
+}
+
+// ── GitHub: read current key ──────────────────────────────────────────────
+async function loadCurrentKey() {
+  try {
+    const res = await fetch(
+      `https://api.github.com/repos/${REPO}/contents/${FILE_PATH}`,
+      { headers: { Authorization: `token ${pat}`, Accept: 'application/vnd.github.v3+json' } }
+    );
+    if (res.status === 404) { log('key.json not yet created — will create on first push', 'info'); return; }
+    if (!res.ok) { log(`GitHub read error: ${res.status}`, 'err'); return; }
+    const data = await res.json();
+    currentFileSha = data.sha;
+    const content = JSON.parse(atob(data.content.replace(/\n/g, '')));
+    currentSecretkey = content.secretkey || '';
+    log(`Loaded existing key: ${currentSecretkey}`, 'ok');
+    document.getElementById('current-key').textContent = currentSecretkey;
+  } catch(e) {
+    log(`Load key error: ${e.message}`, 'err');
+  }
+}
+
+// ── GitHub: push new key ──────────────────────────────────────────────────
+async function pushToGitHub(secretkey) {
+  const content = btoa(JSON.stringify({ secretkey, updated: new Date().toISOString() }));
+  const body = {
+    message: `update key ${new Date().toISOString()}`,
+    content,
+    branch: BRANCH,
+  };
+  if (currentFileSha) body.sha = currentFileSha;
+
+  const res = await fetch(
+    `https://api.github.com/repos/${REPO}/contents/${FILE_PATH}`,
+    {
+      method: 'PUT',
+      headers: {
+        Authorization: `token ${pat}`,
+        Accept: 'application/vnd.github.v3+json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    }
+  );
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.message || res.status);
+  }
+  const data = await res.json();
+  currentFileSha = data.content.sha;
+  return true;
+}
+
+// ── Push new key flow ─────────────────────────────────────────────────────
+async function pushNewKey() {
+  const raw = document.getElementById('link-input').value.trim();
+  const match = raw.match(/[?&]secretkey=([^&\s]+)/);
+  const secretkey = match ? match[1] : (raw.length > 4 && !raw.includes('://') ? raw : null);
+
+  if (!secretkey) { log('No secretkey found in that input', 'err'); return; }
+
+  document.getElementById('push-btn').disabled = true;
+  log(`Pushing key: ${secretkey}…`, 'info');
+
+  try {
+    await pushToGitHub(secretkey);
+    currentSecretkey = secretkey;
+    document.getElementById('current-key').textContent = secretkey;
+    document.getElementById('link-input').value = '';
+    log('Key pushed to GitHub ✓', 'ok');
+    setDot('github', 'ok', 'GitHub: synced');
+
+    // Reconnect Easemob with new key
+    log('Reconnecting Easemob with new key…', 'info');
+    await connectWithKey(secretkey);
+
+  } catch(e) {
+    log(`Push failed: ${e.message}`, 'err');
+    setDot('github', 'err', 'GitHub: error');
+  } finally {
+    document.getElementById('push-btn').disabled = false;
+  }
+}
+
+// ── Easemob connection ────────────────────────────────────────────────────
+async function connectWithKey(secretkey) {
+  setDot('em', 'warn', 'Easemob: connecting…');
+
+  try {
+    const res = await fetch(`${API_URL}/linkShare/verifySecretkey/${secretkey}`);
+    const data = await res.json();
+    if (data.code !== 200) {
+      log(`Auth failed: ${data.msg}`, 'err');
+      setDot('em', 'err', 'Easemob: auth failed');
+      return;
+    }
+    friendIMUserId = data.data.receiverIMUserId;
+    myIMUserId = data.data.myIMUserId;
+    const pwd = data.data.myIMUserPassWord;
+    log(`Credentials OK — me=${myIMUserId} friend=${friendIMUserId}`, 'ok');
+    await loginEasemob(myIMUserId, pwd);
+  } catch(e) {
+    log(`Connect error: ${e.message}`, 'err');
+    setDot('em', 'err', 'Easemob: error');
+  }
+}
+
+async function loginEasemob(userId, pwd) {
+  // Disconnect existing connection
+  if (conn) {
+    try { conn.close(); } catch(e) {}
+    conn = null;
+    isEMConnected = false;
+  }
+
+  const ConnectionClass = getConnectionClass();
+  if (!ConnectionClass) { log('Easemob SDK not available', 'err'); return; }
+
+  conn = new ConnectionClass({ appKey: EASEMOB_APP_KEY });
+  conn.addEventHandler('locks-host', {
+    onConnected: () => {
+      log('Easemob connected ✓', 'ok');
+      isEMConnected = true;
+      setDot('em', 'ok', 'Easemob: online');
+      sendHandshake(0); // Request control
+    },
+    onDisconnected: () => {
+      log('Easemob disconnected', 'err');
+      isEMConnected = false;
+      setDot('em', 'err', 'Easemob: offline');
+      // Auto-reconnect after 10s
+      clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(() => {
+        if (currentSecretkey) connectWithKey(currentSecretkey);
+      }, 10000);
+    },
+    onCmdMessage: (msg) => {
+      log(`CMD received: ${msg.action}`, 'info');
+    },
+    onTokenExpired: () => {
+      log('Token expired — refreshing…', 'info');
+      if (currentSecretkey) connectWithKey(currentSecretkey);
+    },
+    onTokenWillExpire: () => {
+      log('Token expiring soon — refreshing…', 'info');
+      if (currentSecretkey) connectWithKey(currentSecretkey);
+    }
+  });
+
+  try {
+    await conn.open({ user: userId, pwd });
+  } catch(e) {
+    log(`Login failed: ${e.message || JSON.stringify(e)}`, 'err');
+    setDot('em', 'err', 'Easemob: login failed');
+  }
+}
+
+function sendHandshake(type) {
+  if (!conn || !friendIMUserId) return;
+  try {
+    const msg = { type: 'cmd', chatType: 'singleChat', to: friendIMUserId, action: HANDSHAKE_EVENT, ext: { kWebHandShakeCmdType: type } };
+    conn.send(msg).catch(() => {});
+  } catch(e) {}
+}
+
+function getConnectionClass() {
+  try {
+    const cache = window.__webpack_module_cache__ || {};
+    for (const k of Object.keys(cache)) {
+      const m = cache[k];
+      if (m?.exports?.websdk?.connection) return m.exports.websdk.connection;
+    }
+    if (window.WebIM?.connection) return window.WebIM.connection;
+  } catch(e) {}
+  return null;
+}
+
+// ── UI helpers ────────────────────────────────────────────────────────────
+function setDot(id, cls, label) {
+  document.getElementById('dot-' + id).className = 'dot ' + cls;
+  document.getElementById('lbl-' + id).textContent = label;
+}
+
+// ── Wake lock ─────────────────────────────────────────────────────────────
+async function keepAwake() {
+  try {
+    if ('wakeLock' in navigator) await navigator.wakeLock.request('screen');
+  } catch(e) {}
+}
+keepAwake();
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') keepAwake();
+});
+
+// ── Boot ──────────────────────────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>
