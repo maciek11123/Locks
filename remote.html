@@ -18,12 +18,7 @@ body {
   min-height: 100vh; display: flex; flex-direction: column;
   align-items: center; padding: 16px 16px 40px; gap: 14px;
 }
-.header {
-  width: 100%; max-width: 420px;
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 16px; background: var(--surface);
-  border: 1px solid var(--border); border-radius: 14px;
-}
+.header { width: 100%; max-width: 420px; display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; }
 .header-title { font-size: 17px; font-weight: 800; }
 .header-title span { color: var(--accent); }
 .status-row { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
@@ -56,7 +51,6 @@ input[type=range] { width: 100%; accent-color: var(--accent); cursor: pointer; h
 </head>
 <body>
 
-<!-- Loading overlay -->
 <div class="overlay" id="overlay">
   <div class="spin">🔒</div>
   <h2 id="overlay-title">Connecting…</h2>
@@ -64,7 +58,6 @@ input[type=range] { width: 100%; accent-color: var(--accent); cursor: pointer; h
   <button onclick="retryConnect()" id="retry-btn" style="display:none">Retry</button>
 </div>
 
-<!-- Header -->
 <div class="header">
   <div class="header-title">🔒 Locks <span>Remote</span></div>
   <div class="status-row">
@@ -73,17 +66,14 @@ input[type=range] { width: 100%; accent-color: var(--accent); cursor: pointer; h
   </div>
 </div>
 
-<!-- Intensity -->
 <div class="card">
   <div class="card-label">Intensity</div>
   <div class="intensity-display" id="int-display">50 <span>%</span></div>
   <input type="range" id="int-slider" min="0" max="100" value="50" oninput="onIntensity(this.value)">
 </div>
 
-<!-- Stop -->
 <button class="stop-btn" onclick="stopDevice()">⏹ Stop</button>
 
-<!-- Constant -->
 <div class="section-title">Constant</div>
 <div class="mode-grid">
   <button class="mode-btn" id="mode-constant" onclick="selectMode('constant')">
@@ -91,18 +81,15 @@ input[type=range] { width: 100%; accent-color: var(--accent); cursor: pointer; h
   </button>
 </div>
 
-<!-- Classic waves -->
 <div class="section-title">Classic Waves</div>
 <div class="mode-grid" id="grid-waves"></div>
 
-<!-- Patterns -->
 <div class="section-title">Patterns</div>
 <div class="mode-grid" id="grid-patterns"></div>
 
-<!-- Reconnect -->
 <button class="reconnect-btn" onclick="retryConnect()">↺ Reconnect</button>
 
-<!-- Easemob SDK -->
+<!-- Original Adorime Easemob SDK — needed to send commands -->
 <script src="https://cdn.adorimetoy.com/app-resource/web/adorime_remote/adorime_remote_sender/js/chunk-vendors.3cc9b392.js"></script>
 
 <script>
@@ -113,7 +100,6 @@ const EASEMOB_APP_KEY = '1146240320150807#adorime';
 const CMD_EVENT = 'kWebControlCmdEvent';
 const HANDSHAKE_EVENT = 'kWebHandShakeCmdEvent';
 
-// ── Wave data ─────────────────────────────────────────────────────────────
 const WAVES_CLASSIC = [
   { name:'Wave 1',  icon:'〰️', vals:[.5] },
   { name:'Wave 2',  icon:'📈', vals:[.75] },
@@ -152,9 +138,13 @@ const WAVES_PATTERNS = [
 ];
 
 // ── State ─────────────────────────────────────────────────────────────────
-let conn = null, friendIMUserId = '', myIMUserId = '';
+let conn = null;
+let friendIMUserId = '', myIMUserId = '';
 let intensity = 50, currentMode = null, playTimer = null;
 let isConnected = false;
+// Cache credentials so we don't re-verify on every command
+let cachedSecretkey = '';
+let cachedPwd = '';
 
 // ── Build grids ───────────────────────────────────────────────────────────
 function buildGrids() {
@@ -177,7 +167,7 @@ function buildGrids() {
 }
 buildGrids();
 
-// ── Connect flow ──────────────────────────────────────────────────────────
+// ── Connect ───────────────────────────────────────────────────────────────
 async function retryConnect() {
   showOverlay('Connecting…', 'Fetching key from GitHub');
   document.getElementById('retry-btn').style.display = 'none';
@@ -186,24 +176,28 @@ async function retryConnect() {
 
 async function connect() {
   try {
-    // Add cache-bust so we always get the latest key
+    // 1. Fetch key from GitHub
+    showOverlay('Connecting…', 'Fetching key from GitHub');
     const res = await fetch(KEY_RAW_URL + '?t=' + Date.now());
-    if (!res.ok) throw new Error('Could not read key.json — has host.html pushed a key yet?');
+    if (!res.ok) throw new Error('Could not read key.json — has host pushed a key yet?');
     const data = await res.json();
     const secretkey = data.secretkey;
     if (!secretkey) throw new Error('key.json has no secretkey');
 
+    // 2. Verify key ONCE and cache credentials
     showOverlay('Authenticating…', `Key: ${secretkey}`);
     const auth = await fetch(`${API_URL}/linkShare/verifySecretkey/${secretkey}`);
     const authData = await auth.json();
     if (authData.code !== 200) throw new Error(`Auth failed: ${authData.msg}`);
 
+    cachedSecretkey = secretkey;
     friendIMUserId = authData.data.receiverIMUserId;
     myIMUserId = authData.data.myIMUserId;
-    const pwd = authData.data.myIMUserPassWord;
+    cachedPwd = authData.data.myIMUserPassWord;
 
-    showOverlay('Connecting…', 'Logging into Easemob');
-    await loginEasemob(myIMUserId, pwd);
+    // 3. Connect Easemob with cached credentials
+    showOverlay('Connecting…', 'Logging in');
+    await loginEasemob(myIMUserId, cachedPwd);
 
   } catch(e) {
     showOverlay('Connection failed', e.message, true);
@@ -211,11 +205,12 @@ async function connect() {
   }
 }
 
+// ── Easemob login ─────────────────────────────────────────────────────────
 async function loginEasemob(userId, pwd) {
   if (conn) { try { conn.close(); } catch(e) {} conn = null; }
 
   const C = getConnectionClass();
-  if (!C) throw new Error('Easemob SDK not available');
+  if (!C) throw new Error('Easemob SDK not available — try on mobile Chrome');
 
   conn = new C({ appKey: EASEMOB_APP_KEY });
   conn.addEventHandler('locks-remote', {
@@ -228,16 +223,23 @@ async function loginEasemob(userId, pwd) {
     onDisconnected: () => {
       isConnected = false;
       setStatus('err', 'Disconnected');
-      showOverlay('Disconnected', 'Reconnecting in 10s…');
-      setTimeout(retryConnect, 10000);
+      showOverlay('Disconnected', 'Reconnecting in 8s…');
+      // Reconnect using cached credentials — no need to re-verify key
+      setTimeout(() => loginEasemob(myIMUserId, cachedPwd), 8000);
     },
     onCmdMessage: (msg) => {
       if (msg.action === HANDSHAKE_EVENT && msg.ext?.kWebHandShakeCmdType === 4) {
         setStatus('warn', 'Session ended');
       }
     },
-    onTokenExpired: () => retryConnect(),
-    onTokenWillExpire: () => retryConnect(),
+    onTokenExpired: () => {
+      // Token expired — need fresh credentials
+      retryConnect();
+    },
+    onTokenWillExpire: () => {
+      // Refresh before it expires
+      retryConnect();
+    },
   });
 
   return conn.open({ user: userId, pwd });
@@ -287,7 +289,6 @@ function expandVals(vals, target) {
   while (out.length < target) for (const v of vals) { out.push(v); if (out.length >= target) break; }
   return out;
 }
-
 function scaleVals(vals, intensity) {
   return vals.map(v => Math.min(1, v * (intensity / 100)));
 }
@@ -297,20 +298,12 @@ function selectMode(modeId, vals) {
   document.getElementById('mode-' + modeId)?.classList.add('active');
   stopPlayback();
   currentMode = { id: modeId, vals };
-
-  if (modeId === 'constant') {
-    sendCmd(1, intensity / 100);
-    return;
-  }
-
+  if (modeId === 'constant') { sendCmd(1, intensity / 100); return; }
   const scaled = scaleVals(vals, intensity);
   sendCmd(2, expandVals(scaled, 200));
-
-  // Re-send every 10s to loop
   playTimer = setInterval(() => {
     if (!isConnected) return;
-    const s = scaleVals(vals, intensity);
-    sendCmd(2, expandVals(s, 200));
+    sendCmd(2, expandVals(scaleVals(vals, intensity), 200));
   }, 10000);
 }
 
@@ -338,9 +331,7 @@ function showOverlay(title, msg, showRetry = false) {
   document.getElementById('overlay-msg').textContent = msg;
   document.getElementById('retry-btn').style.display = showRetry ? 'block' : 'none';
 }
-function hideOverlay() {
-  document.getElementById('overlay').style.display = 'none';
-}
+function hideOverlay() { document.getElementById('overlay').style.display = 'none'; }
 function setStatus(cls, label) {
   document.getElementById('dot').className = 'dot ' + cls;
   document.getElementById('status-lbl').textContent = label;
@@ -355,7 +346,6 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') { keepAwake(); if (!isConnected) retryConnect(); }
 });
 
-// ── Boot ──────────────────────────────────────────────────────────────────
 connect();
 </script>
 </body>
