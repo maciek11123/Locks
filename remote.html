@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Locks — Remote</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+:root {
+  --bg: #0a0a0f; --surface: #13131a; --border: #1e1e2a;
+  --accent: #c084fc; --accent2: #818cf8;
+  --green: #34d399; --red: #f87171;
+  --text: #e8e8f0; --muted: #555;
+}
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--bg); color: var(--text);
+  min-height: 100vh; display: flex; flex-direction: column;
+  align-items: center; padding: 16px 16px 40px; gap: 14px;
+}
+.header {
+  width: 100%; max-width: 420px;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 14px;
+}
+.header-title { font-size: 17px; font-weight: 800; }
+.header-title span { color: var(--accent); }
+.status-row { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); transition: background .3s; }
+.dot.ok { background: var(--green); }
+.dot.warn { background: #facc15; animation: pulse 1s infinite; }
+.dot.err { background: var(--red); }
+@keyframes pulse { 0%,100%{opacity:1}50%{opacity:.4} }
+.card { width: 100%; max-width: 420px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px; }
+.card-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; margin-bottom: 10px; }
+.intensity-display { font-size: 56px; font-weight: 800; color: var(--accent); text-align: center; line-height: 1; margin-bottom: 10px; letter-spacing: -2px; }
+.intensity-display span { font-size: 22px; font-weight: 400; color: var(--muted); }
+input[type=range] { width: 100%; accent-color: var(--accent); cursor: pointer; height: 6px; }
+.stop-btn { width: 100%; max-width: 420px; padding: 16px; border-radius: 14px; border: 1px solid #2d1818; font-size: 16px; font-weight: 700; cursor: pointer; background: #1c1c24; color: var(--red); transition: background .15s, transform .1s; }
+.stop-btn:active { transform: scale(.98); background: #2a1010; }
+.section-title { width: 100%; max-width: 420px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; padding: 0 2px; }
+.mode-grid { width: 100%; max-width: 420px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.mode-btn { padding: 12px 6px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface); color: var(--text); font-size: 11px; font-weight: 600; cursor: pointer; text-align: center; transition: all .15s; line-height: 1.3; }
+.mode-btn:active { transform: scale(.95); }
+.mode-btn.active { background: linear-gradient(135deg,rgba(192,132,252,.2),rgba(129,140,248,.2)); border-color: var(--accent); color: var(--accent); }
+.mode-icon { font-size: 18px; display: block; margin-bottom: 3px; }
+.reconnect-btn { width: 100%; max-width: 420px; padding: 14px; border-radius: 12px; border: 1px solid var(--border); font-size: 14px; font-weight: 600; cursor: pointer; background: var(--surface); color: var(--text); }
+.overlay { position: fixed; inset: 0; background: rgba(10,10,15,.92); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; z-index: 100; padding: 32px; }
+.overlay h2 { font-size: 20px; font-weight: 700; }
+.overlay p { font-size: 14px; color: var(--muted); text-align: center; line-height: 1.6; }
+.overlay .spin { font-size: 36px; animation: spin 1.2s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.overlay button { width: 100%; max-width: 300px; padding: 15px; border-radius: 12px; border: none; font-size: 15px; font-weight: 700; cursor: pointer; background: linear-gradient(135deg,var(--accent),var(--accent2)); color: #fff; }
+</style>
+</head>
+<body>
+
+<!-- Loading overlay -->
+<div class="overlay" id="overlay">
+  <div class="spin">🔒</div>
+  <h2 id="overlay-title">Connecting…</h2>
+  <p id="overlay-msg">Fetching key from GitHub</p>
+  <button onclick="retryConnect()" id="retry-btn" style="display:none">Retry</button>
+</div>
+
+<!-- Header -->
+<div class="header">
+  <div class="header-title">🔒 Locks <span>Remote</span></div>
+  <div class="status-row">
+    <div class="dot" id="dot"></div>
+    <span id="status-lbl">Connecting</span>
+  </div>
+</div>
+
+<!-- Intensity -->
+<div class="card">
+  <div class="card-label">Intensity</div>
+  <div class="intensity-display" id="int-display">50 <span>%</span></div>
+  <input type="range" id="int-slider" min="0" max="100" value="50" oninput="onIntensity(this.value)">
+</div>
+
+<!-- Stop -->
+<button class="stop-btn" onclick="stopDevice()">⏹ Stop</button>
+
+<!-- Constant -->
+<div class="section-title">Constant</div>
+<div class="mode-grid">
+  <button class="mode-btn" id="mode-constant" onclick="selectMode('constant')">
+    <span class="mode-icon">⚡</span>Constant
+  </button>
+</div>
+
+<!-- Classic waves -->
+<div class="section-title">Classic Waves</div>
+<div class="mode-grid" id="grid-waves"></div>
+
+<!-- Patterns -->
+<div class="section-title">Patterns</div>
+<div class="mode-grid" id="grid-patterns"></div>
+
+<!-- Reconnect -->
+<button class="reconnect-btn" onclick="retryConnect()">↺ Reconnect</button>
+
+<!-- Easemob SDK -->
+<script src="https://cdn.adorimetoy.com/app-resource/web/adorime_remote/adorime_remote_sender/js/chunk-vendors.3cc9b392.js"></script>
+
+<script>
+const REPO = 'maciek11123/Locks';
+const KEY_RAW_URL = `https://raw.githubusercontent.com/${REPO}/main/key.json`;
+const API_URL = 'https://api.adorimetoy.com:29197/prod-api/api';
+const EASEMOB_APP_KEY = '1146240320150807#adorime';
+const CMD_EVENT = 'kWebControlCmdEvent';
+const HANDSHAKE_EVENT = 'kWebHandShakeCmdEvent';
+
+// ── Wave data ─────────────────────────────────────────────────────────────
+const WAVES_CLASSIC = [
+  { name:'Wave 1',  icon:'〰️', vals:[.5] },
+  { name:'Wave 2',  icon:'📈', vals:[.75] },
+  { name:'Wave 3',  icon:'⬆️', vals:[1] },
+  { name:'Wave 4',  icon:'🌊', vals:[0,.26,.5,.71,.87,.97,1,.97,.87,.7,.5,.25] },
+  { name:'Wave 5',  icon:'🔄', vals:[0,.16,.3,.45,.59,.71,.81,.89,.95,.98,1,.98,.95,.89,.81,.71,.59,.45,.3,.16] },
+  { name:'Wave 6',  icon:'📊', vals:[.2,.3,.4,.5,.6,.7,.8,.9,1] },
+  { name:'Wave 7',  icon:'💥', vals:[0,0,1,1] },
+  { name:'Wave 8',  icon:'🎵', vals:[.5,.5,.5,.5,0,0,.75,.75,.75,.75,0,0,1,1,1,1,1,1,0,0] },
+  { name:'Wave 9',  icon:'🔢', vals:[0,0,0,0,1,1,1,1,1,1] },
+  { name:'Wave 10', icon:'📉', vals:[.77,.81,.85,.88,.91,.95,.98,.99,1,1,1,.99,.98,.95,.91,.88,.85,.81] },
+  { name:'Wave 11', icon:'🎲', vals:[.1,.2,.3,.4,.5,.6,.7,.8,.9,1,.9,.8,.7,.6,.5,.4,.3,.2] },
+  { name:'Wave 12', icon:'⚡', vals:[0,0,1,1,0,0,1,1,0,0,1,1] },
+];
+const WAVES_PATTERNS = [
+  { name:'Spring',    icon:'🌸', vals:[0,.26,.5,.71,.87,.97,1,.97,.87,.7,.5,.25] },
+  { name:'Tender',    icon:'💝', vals:[0,.16,.3,.45,.59,.71,.81,.89,.95,.98,1,.98,.95,.89,.81,.71,.59,.45,.3,.16] },
+  { name:'Flow',      icon:'🌊', vals:[0,.25,.5,.75,1,1,1,1,.75,.5,.25,.5,.75] },
+  { name:'Rocket',    icon:'🚀', vals:[0,.15,.3,.45,.6,.75,.9,.9,.9,.9,.9,.45,.6,.75] },
+  { name:'Surge',     icon:'⚡', vals:[.5,.6,.7,.8,.9,1] },
+  { name:'Heartbeat', icon:'💓', vals:[.77,.81,.85,.88,.91,.95,.98,.99,1,1,.99,.98,.95,.91,.88,.85,.81,.77] },
+  { name:'Sine',      icon:'〰️', vals:[0,.25,.5,.75,1,.75,.5,.25,0,.31,.59,.81,.95,1,.95,.81,.59,.31] },
+  { name:'Staircase', icon:'📶', vals:[.1,.2,.3,.1,.2,.3,.4,.1,.2,.3,.4,.5,.1,.2,.3,.4,.5,.6] },
+  { name:'Climb',     icon:'🏔️', vals:[.15,.3,.45,.6,.8,.8,.8,1,1,1,.4,.6,.8,0] },
+  { name:'Pulse',     icon:'💗', vals:[0,0,1,1] },
+  { name:'Wave Up',   icon:'🌅', vals:[0,.25,.5,.7,.87,.97,1,.97,.87,.7,.5,.25,.5,.75] },
+  { name:'Smooth',    icon:'🎶', vals:[.5,.58,.66,.74,.8,.86,.91,.95,.98,.99,1,.99,.98,.95,.91,.86,.8,.74,.66,.58] },
+  { name:'Interval',  icon:'🎯', vals:[0,0,.6,.6,0,0,.6,.6,0,0,.6,.6,0,0,.6,.6] },
+  { name:'Gallop',    icon:'🐎', vals:[.2,.4,.6,.8,1,0] },
+  { name:'Long-Short',icon:'📡', vals:[.9,.9,.9,.9,.9,.9,0,0,0,0,0,0] },
+  { name:'Ocean',     icon:'🌊', vals:[0,.31,.59,.81,.95,1,.95,.81,.59,.31,0] },
+  { name:'Ripple',    icon:'💧', vals:[.25,.5,.75,1,1,1,.75,.5] },
+  { name:'Ebb',       icon:'🌙', vals:[0,.25,.5,.75,1,.75,.5,.25] },
+  { name:'Ignite',    icon:'🔥', vals:[.15,.3,.45,.6,.75,.9,1,1,1,1,1,1,0] },
+  { name:'Throb',     icon:'💜', vals:[.3,.3,.3,.5,.5,.5,.8,.8,.8,1,1,1,.8,.8,.8,.5,.5,.5] },
+];
+
+// ── State ─────────────────────────────────────────────────────────────────
+let conn = null, friendIMUserId = '', myIMUserId = '';
+let intensity = 50, currentMode = null, playTimer = null;
+let isConnected = false;
+
+// ── Build grids ───────────────────────────────────────────────────────────
+function buildGrids() {
+  const gw = document.getElementById('grid-waves');
+  WAVES_CLASSIC.forEach((w, i) => {
+    const b = document.createElement('button');
+    b.className = 'mode-btn'; b.id = 'mode-wave-' + i;
+    b.innerHTML = `<span class="mode-icon">${w.icon}</span>${w.name}`;
+    b.onclick = () => selectMode('wave-' + i, w.vals);
+    gw.appendChild(b);
+  });
+  const gp = document.getElementById('grid-patterns');
+  WAVES_PATTERNS.forEach((w, i) => {
+    const b = document.createElement('button');
+    b.className = 'mode-btn'; b.id = 'mode-pattern-' + i;
+    b.innerHTML = `<span class="mode-icon">${w.icon}</span>${w.name}`;
+    b.onclick = () => selectMode('pattern-' + i, w.vals);
+    gp.appendChild(b);
+  });
+}
+buildGrids();
+
+// ── Connect flow ──────────────────────────────────────────────────────────
+async function retryConnect() {
+  showOverlay('Connecting…', 'Fetching key from GitHub');
+  document.getElementById('retry-btn').style.display = 'none';
+  await connect();
+}
+
+async function connect() {
+  try {
+    // Add cache-bust so we always get the latest key
+    const res = await fetch(KEY_RAW_URL + '?t=' + Date.now());
+    if (!res.ok) throw new Error('Could not read key.json — has host.html pushed a key yet?');
+    const data = await res.json();
+    const secretkey = data.secretkey;
+    if (!secretkey) throw new Error('key.json has no secretkey');
+
+    showOverlay('Authenticating…', `Key: ${secretkey}`);
+    const auth = await fetch(`${API_URL}/linkShare/verifySecretkey/${secretkey}`);
+    const authData = await auth.json();
+    if (authData.code !== 200) throw new Error(`Auth failed: ${authData.msg}`);
+
+    friendIMUserId = authData.data.receiverIMUserId;
+    myIMUserId = authData.data.myIMUserId;
+    const pwd = authData.data.myIMUserPassWord;
+
+    showOverlay('Connecting…', 'Logging into Easemob');
+    await loginEasemob(myIMUserId, pwd);
+
+  } catch(e) {
+    showOverlay('Connection failed', e.message, true);
+    setStatus('err', 'Error');
+  }
+}
+
+async function loginEasemob(userId, pwd) {
+  if (conn) { try { conn.close(); } catch(e) {} conn = null; }
+
+  const C = getConnectionClass();
+  if (!C) throw new Error('Easemob SDK not available');
+
+  conn = new C({ appKey: EASEMOB_APP_KEY });
+  conn.addEventHandler('locks-remote', {
+    onConnected: () => {
+      isConnected = true;
+      hideOverlay();
+      setStatus('ok', 'Connected');
+      sendHandshake(0);
+    },
+    onDisconnected: () => {
+      isConnected = false;
+      setStatus('err', 'Disconnected');
+      showOverlay('Disconnected', 'Reconnecting in 10s…');
+      setTimeout(retryConnect, 10000);
+    },
+    onCmdMessage: (msg) => {
+      if (msg.action === HANDSHAKE_EVENT && msg.ext?.kWebHandShakeCmdType === 4) {
+        setStatus('warn', 'Session ended');
+      }
+    },
+    onTokenExpired: () => retryConnect(),
+    onTokenWillExpire: () => retryConnect(),
+  });
+
+  return conn.open({ user: userId, pwd });
+}
+
+function getConnectionClass() {
+  try {
+    const cache = window.__webpack_module_cache__ || {};
+    for (const k of Object.keys(cache)) {
+      const m = cache[k];
+      if (m?.exports?.websdk?.connection) return m.exports.websdk.connection;
+    }
+    if (window.WebIM?.connection) return window.WebIM.connection;
+  } catch(e) {}
+  return null;
+}
+
+// ── Send commands ─────────────────────────────────────────────────────────
+function sendCmd(cmdType, cmdData) {
+  if (!conn || !isConnected || !friendIMUserId) return;
+  const ext = {
+    kWebControlJsonKey: JSON.stringify({
+      kWebControlCmdType: cmdType,
+      kWebControlCmdData: cmdData,
+      kWebControlModelName: '',
+      kWebControlMenuIndex: 0,
+      kWebControlCmdDevice: { madaEnableA: true, madaEnableB: true, madaEnableC: true }
+    })
+  };
+  try {
+    conn.send({ type: 'cmd', chatType: 'singleChat', to: friendIMUserId, action: CMD_EVENT, ext })
+      .catch(() => {});
+  } catch(e) {}
+}
+
+function sendHandshake(type) {
+  if (!conn || !friendIMUserId) return;
+  try {
+    conn.send({ type: 'cmd', chatType: 'singleChat', to: friendIMUserId, action: HANDSHAKE_EVENT, ext: { kWebHandShakeCmdType: type } })
+      .catch(() => {});
+  } catch(e) {}
+}
+
+// ── Mode logic ────────────────────────────────────────────────────────────
+function expandVals(vals, target) {
+  const out = [];
+  while (out.length < target) for (const v of vals) { out.push(v); if (out.length >= target) break; }
+  return out;
+}
+
+function scaleVals(vals, intensity) {
+  return vals.map(v => Math.min(1, v * (intensity / 100)));
+}
+
+function selectMode(modeId, vals) {
+  document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('mode-' + modeId)?.classList.add('active');
+  stopPlayback();
+  currentMode = { id: modeId, vals };
+
+  if (modeId === 'constant') {
+    sendCmd(1, intensity / 100);
+    return;
+  }
+
+  const scaled = scaleVals(vals, intensity);
+  sendCmd(2, expandVals(scaled, 200));
+
+  // Re-send every 10s to loop
+  playTimer = setInterval(() => {
+    if (!isConnected) return;
+    const s = scaleVals(vals, intensity);
+    sendCmd(2, expandVals(s, 200));
+  }, 10000);
+}
+
+function stopPlayback() {
+  if (playTimer) { clearInterval(playTimer); playTimer = null; }
+}
+
+function stopDevice() {
+  stopPlayback();
+  currentMode = null;
+  document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+  sendCmd(1, 0);
+}
+
+function onIntensity(val) {
+  intensity = parseInt(val);
+  document.getElementById('int-display').innerHTML = `${intensity} <span>%</span>`;
+  if (currentMode?.id === 'constant') sendCmd(1, intensity / 100);
+}
+
+// ── UI helpers ────────────────────────────────────────────────────────────
+function showOverlay(title, msg, showRetry = false) {
+  document.getElementById('overlay').style.display = 'flex';
+  document.getElementById('overlay-title').textContent = title;
+  document.getElementById('overlay-msg').textContent = msg;
+  document.getElementById('retry-btn').style.display = showRetry ? 'block' : 'none';
+}
+function hideOverlay() {
+  document.getElementById('overlay').style.display = 'none';
+}
+function setStatus(cls, label) {
+  document.getElementById('dot').className = 'dot ' + cls;
+  document.getElementById('status-lbl').textContent = label;
+}
+
+// ── Wake lock ─────────────────────────────────────────────────────────────
+async function keepAwake() {
+  try { if ('wakeLock' in navigator) await navigator.wakeLock.request('screen'); } catch(e) {}
+}
+keepAwake();
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') { keepAwake(); if (!isConnected) retryConnect(); }
+});
+
+// ── Boot ──────────────────────────────────────────────────────────────────
+connect();
+</script>
+</body>
+</html>
